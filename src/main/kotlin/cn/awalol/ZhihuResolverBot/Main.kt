@@ -130,6 +130,12 @@ suspend fun main() {
                     }
                 }
             }
+            //在末尾添加文章来源
+            result.add(ElementBean(
+                tag = "p",
+                children = listOf("文章来源: $url")
+            ))
+
             val json = result.toJSONString()
             logger.debug(json)
 
@@ -172,5 +178,5 @@ fun loadConfig(): ConfigBean {
         exitProcess(1)
     }
     //读取配置内容
-    return FileReader(file).readText().to();
+    return FileReader(file).readText().to()
 }
