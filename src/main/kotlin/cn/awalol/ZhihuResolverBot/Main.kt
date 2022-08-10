@@ -17,9 +17,7 @@ import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
-import io.ktor.client.utils.*
 import io.ktor.http.*
-import io.ktor.util.*
 import org.jsoup.Jsoup
 import org.slf4j.LoggerFactory
 import java.io.File
@@ -32,7 +30,6 @@ import kotlin.system.exitProcess
 val logger = LoggerFactory.getLogger("ZhihuResolverBot")
 val config = loadConfig()
 
-@OptIn(InternalAPI::class)
 suspend fun main() {
     val proxyHost = System.getProperty("http.proxyHost")
     val proxyPort = System.getProperty("http.proxyPort")
@@ -45,9 +42,6 @@ suspend fun main() {
     }
 
     val client = HttpClient(CIO){
-        buildHeaders {
-            this.append(HttpHeaders.UserAgent,"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36 Edg/102.0.1245.30")
-        }
         engine {
             if(!proxyHost.isNullOrEmpty() && !proxyPort.isNullOrEmpty()){
                 proxy = Proxy(Proxy.Type.HTTP,InetSocketAddress(proxyHost,proxyPort.toInt()))
@@ -77,88 +71,22 @@ suspend fun main() {
                 answer.getJSONObject("paidInfo").getString("content")
             } else{
                 answer.getString("content")
-            }
-//            logger.debug(answer)
-            val filterTags = listOf("p","img","blockquote","strong")
-            val answerHtml = Jsoup.parse(content)
-            val result = JSONArray()
-            for (element in answerHtml.allElements) {
-                if(filterTags.contains(element.tagName())){
-                    val abc = when(element.tagName()){
-                        "p" -> ElementBean(
-                            tag = "p",
-                            children = listOf(element.text())
-                        )
-                        "img" -> {
-                            val src = element.attr("src")
-                            if(!src.contains("data:image")){
-                                ElementBean(
-                                    tag = "figure",
-                                    children = listOf(
-                                        ElementBean(
-                                            tag = "div",
-                                            attrs = JSONObject.of("class","figure_wrapper"),
-                                            children = listOf(ElementBean(
-                                                tag = "img",
-                                                attrs = JSONObject.of("src",src)
-                                            ))
-                                        ),
-                                        ElementBean(
-                                            tag = "figcaption"
-                                        )
-                                    )
-                                )
-                            } else {
-                                continue
-                            }
-                        }
-                        "blockquote" -> ElementBean(
-                            tag = "blockquote",
-                            children = listOf(element.text())
-                        )
-                        "strong" -> ElementBean(
-                            tag = "p",
-                            children = listOf(ElementBean(
-                                tag = "strong",
-                                children = listOf(element.text())
-                            ))
-                        )
-                        else -> {null}
-                    }
-                    if (abc != null) {
-                        result.add(abc)
-                    }
+            }.plus("<br><a href=\"$url\">文章来源</a></br>")
+            logger.debug(content)
+            val title = jsoup.title().substring(0,jsoup.title().length - 5)
+            if(config.telegraphToken.isNotEmpty()){
+                try {
+                    this.sendMessage(it.chat.id,telegraph(content, title, client))
+                }catch (e : Exception){
+                    this.sendMessage(it.chat.id,e.message!!)
                 }
             }
-            //在末尾添加文章来源
-            result.add(ElementBean(
-                tag = "p",
-                children = listOf("文章来源: $url")
-            ))
-
-            val json = result.toJSONString()
-            logger.debug(json)
-
-            val publishTelegraph : String = client.post("https://api.telegra.ph/createPage"){
-                body=MultiPartFormDataContent(
-                    formData {
-                        append("access_token",config.telegraphToken)
-                        append("title",jsoup.title().substring(0,jsoup.title().length - 5))
-                        append("content",json)
-                    }
-                )
-            }.bodyAsText()
-            logger.debug(publishTelegraph)
-            val telegraphJSONObject = publishTelegraph.to<JSONObject>()
-
-            if(telegraphJSONObject.getBoolean("ok")){
-                val telegraphUrl = telegraphJSONObject.getJSONObject("result").getString("url")
-                logger.info("${jsoup.title()} | $telegraphUrl")
-                this.sendMessage(it.chat.id,telegraphUrl)
-            }else{
-                val error = telegraphJSONObject.getString("error")
-                logger.error(error)
-                this.sendMessage(it.chat.id,"Error: $error")
+            if(config.yuqueToken.isNotEmpty() && config.namespace.isNotEmpty()){
+                try {
+                    this.sendMessage(it.chat.id,yuque(client, title, content))
+                }catch (e : Exception){
+                    this.sendMessage(it.chat.id,e.message!!)
+                }
             }
         }
 
@@ -179,4 +107,115 @@ fun loadConfig(): ConfigBean {
     }
     //读取配置内容
     return FileReader(file).readText().to()
+}
+
+suspend fun telegraph(content: String, title: String, client: HttpClient) : String{
+    val filterTags = listOf("p","img","blockquote","strong")
+    val answerHtml = Jsoup.parse(content)
+    val result = JSONArray()
+    for (element in answerHtml.allElements) {
+        if(filterTags.contains(element.tagName())){
+            val abc = when(element.tagName()){
+                "p" -> ElementBean(
+                    tag = "p",
+                    children = listOf(element.text())
+                )
+                "img" -> {
+                    val src = element.attr("src")
+                    if(!src.contains("data:image")){
+                        ElementBean(
+                            tag = "figure",
+                            children = listOf(
+                                ElementBean(
+                                    tag = "div",
+                                    attrs = JSONObject.of("class","figure_wrapper"),
+                                    children = listOf(ElementBean(
+                                        tag = "img",
+                                        attrs = JSONObject.of("src",src)
+                                    ))
+                                ),
+                                ElementBean(
+                                    tag = "figcaption"
+                                )
+                            )
+                        )
+                    } else {
+                        continue
+                    }
+                }
+                "blockquote" -> ElementBean(
+                    tag = "blockquote",
+                    children = listOf(element.text())
+                )
+                "strong" -> ElementBean(
+                    tag = "p",
+                    children = listOf(ElementBean(
+                        tag = "strong",
+                        children = listOf(element.text())
+                    ))
+                )
+                else -> {null}
+            }
+            if (abc != null) {
+                result.add(abc)
+            }
+        }
+    }
+
+    val json = result.toJSONString()
+    logger.debug(json)
+
+    val publishTelegraph : String = client.post("https://api.telegra.ph/createPage"){
+        setBody(MultiPartFormDataContent(
+            formData {
+                append("access_token",config.telegraphToken)
+                append("title",title)
+                append("content",json)
+            }
+        ))
+        userAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36 Edg/102.0.1245.30")
+    }.bodyAsText()
+    logger.debug(publishTelegraph)
+    val telegraphJSONObject = publishTelegraph.to<JSONObject>()
+
+    if(telegraphJSONObject.getBoolean("ok")){
+        val telegraphUrl = telegraphJSONObject.getJSONObject("result").getString("url")
+        logger.info("$title | $telegraphUrl")
+        if(config.telegraphMirrorHost.isNotEmpty()){
+            return telegraphUrl.replaceFirst("telegra.ph",config.telegraphMirrorHost)
+        }else{
+            return telegraphUrl
+        }
+    }else{
+        val error = telegraphJSONObject.getString("error")
+        logger.error(error)
+        throw Exception(error)
+    }
+}
+
+suspend fun yuque(client: HttpClient, title: String, content: String) : String{
+    val requestJson = JSONObject().also {
+        it["title"] = title
+        it["format"] = "html"
+        it["body"] = content
+    }
+
+    val response : HttpResponse = client.post("https://www.yuque.com/api/v2/repos/${config.namespace}/docs/"){
+        setBody(requestJson.toJSONString())
+        headers{
+            append(HttpHeaders.UserAgent,"ZhihuResolverBot")
+            append(HttpHeaders.ContentType,"application/json")
+            append("X-Auth-Token",config.yuqueToken)
+        }
+    }
+
+    if(response.status == HttpStatusCode.OK){
+        val data = response.bodyAsText().to<JSONObject>()
+        logger.debug(data.toJSONString(JSONWriter.Feature.PrettyFormat))
+        val result = "https://www.yuque.com/${config.namespace}/${data.getJSONObject("data").getString("slug")}"
+        logger.info("$title | $result")
+        return result
+    }else{
+        throw Exception(response.bodyAsText())
+    }
 }

@@ -8,5 +8,11 @@ data class ConfigBean(
     @JSONField(name = "cookie")
     val cookie : String = "",
     @JSONField(name = "telegraphToken")
-    val telegraphToken : String = ""
+    val telegraphToken : String = "",
+    @JSONField(name = "telegraphMirrorHost")
+    val telegraphMirrorHost : String = "",
+    @JSONField(name = "yuqueToken")
+    val yuqueToken : String = "",
+    @JSONField(name = "namespace")
+    val namespace : String = ""
 )
