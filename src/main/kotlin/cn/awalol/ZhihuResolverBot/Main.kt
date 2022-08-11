@@ -60,7 +60,7 @@ suspend fun main() {
 
         onContentMessage {
             logger.debug(it.toString())
-            val url = (it.content as TextContent).textSources[0].source
+            val url = (it.content as TextContent).textSources.first().source
             logger.debug("Get Source : $url")
             val zhihuContent = client.get(url){
                 headers.append(HttpHeaders.Cookie,config.cookie)
@@ -224,7 +224,7 @@ suspend fun yuque(client: HttpClient, title: String, content: String) : String{
 
 fun getContent(jsoup: Document,url: String) : String{
     if(url.contains("/answer/")){
-        val initialData = jsoup.getElementById("js-initialData")!!.text().to<JSONObject>()
+        val initialData = jsoup.getElementById("js-initialData")!!.html().to<JSONObject>()
         val answer = initialData
             .getJSONObject("initialState")
             .getJSONObject("entities")
