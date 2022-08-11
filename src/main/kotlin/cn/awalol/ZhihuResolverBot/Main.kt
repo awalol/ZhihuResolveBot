@@ -17,8 +17,10 @@ import io.ktor.client.engine.cio.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
+import io.ktor.client.utils.*
 import io.ktor.http.*
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Document
 import org.slf4j.LoggerFactory
 import java.io.File
 import java.io.FileReader
@@ -47,6 +49,9 @@ suspend fun main() {
                 proxy = Proxy(Proxy.Type.HTTP,InetSocketAddress(proxyHost,proxyPort.toInt()))
             }
         }
+        buildHeaders {
+            set(HttpHeaders.UserAgent,"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36 Edg/102.0.1245.30")
+        }
     }
 
     bot.buildBehaviourWithLongPolling {
@@ -55,30 +60,20 @@ suspend fun main() {
 
         onContentMessage {
             logger.debug(it.toString())
-            val url = (it.content as TextContent).textSources.first().source
+            val url = (it.content as TextContent).textSources[0].source
             logger.debug("Get Source : $url")
             val zhihuContent = client.get(url){
                 headers.append(HttpHeaders.Cookie,config.cookie)
             }.body<String>()
+            logger.debug(zhihuContent)
             val jsoup = Jsoup.parse(zhihuContent)
-            val initialData = jsoup.getElementById("js-initialData")!!.html().to<JSONObject>()
-//            logger.debug(initialData.toJSONString())
-            val answer = initialData.getJSONObject("initialState")
-                .getJSONObject("entities")
-                .getJSONObject("answers")
-                .getJSONObject(url.split("/").last())
-            val content = if(answer.containsKey("paidInfo")) {
-                answer.getJSONObject("paidInfo").getString("content")
-            } else{
-                answer.getString("content")
-            }.plus("<br><a href=\"$url\">文章来源</a></br>")
-            logger.debug(content)
-            val title = jsoup.title().substring(0,jsoup.title().length - 5)
+            val content = getContent(jsoup, url).plus("<br><a href=\"$url\">文章来源</a></br>")
+            val title = jsoup.title()
             if(config.telegraphToken.isNotEmpty()){
                 try {
-                    this.sendMessage(it.chat.id,telegraph(content, title, client))
+                    this.sendMessage(it.chat.id,telegraph(content, title, client,url))
                 }catch (e : Exception){
-                    this.sendMessage(it.chat.id,e.message!!)
+                    this.sendMessage(it.chat.id,e.localizedMessage!!)
                 }
             }
             if(config.yuqueToken.isNotEmpty() && config.namespace.isNotEmpty()){
@@ -109,17 +104,23 @@ fun loadConfig(): ConfigBean {
     return FileReader(file).readText().to()
 }
 
-suspend fun telegraph(content: String, title: String, client: HttpClient) : String{
+suspend fun telegraph(content: String, title: String, client: HttpClient,source: String) : String{
     val filterTags = listOf("p","img","blockquote","strong")
     val answerHtml = Jsoup.parse(content)
     val result = JSONArray()
     for (element in answerHtml.allElements) {
         if(filterTags.contains(element.tagName())){
             val abc = when(element.tagName()){
-                "p" -> ElementBean(
-                    tag = "p",
-                    children = listOf(element.text())
-                )
+                "p" -> {
+                    if(!element.hasAttr("strong")){
+                        ElementBean(
+                            tag = "p",
+                            children = listOf(element.text())
+                        )
+                    }else{
+                        continue
+                    }
+                }
                 "img" -> {
                     val src = element.attr("src")
                     if(!src.contains("data:image")){
@@ -171,9 +172,10 @@ suspend fun telegraph(content: String, title: String, client: HttpClient) : Stri
                 append("access_token",config.telegraphToken)
                 append("title",title)
                 append("content",json)
+                append("author_name","Source")
+                append("author_url",source)
             }
         ))
-        userAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36 Edg/102.0.1245.30")
     }.bodyAsText()
     logger.debug(publishTelegraph)
     val telegraphJSONObject = publishTelegraph.to<JSONObject>()
@@ -181,10 +183,10 @@ suspend fun telegraph(content: String, title: String, client: HttpClient) : Stri
     if(telegraphJSONObject.getBoolean("ok")){
         val telegraphUrl = telegraphJSONObject.getJSONObject("result").getString("url")
         logger.info("$title | $telegraphUrl")
-        if(config.telegraphMirrorHost.isNotEmpty()){
-            return telegraphUrl.replaceFirst("telegra.ph",config.telegraphMirrorHost)
+        return if(config.telegraphMirrorHost.isNotEmpty()){
+            telegraphUrl.replaceFirst("telegra.ph",config.telegraphMirrorHost)
         }else{
-            return telegraphUrl
+            telegraphUrl
         }
     }else{
         val error = telegraphJSONObject.getString("error")
@@ -203,9 +205,9 @@ suspend fun yuque(client: HttpClient, title: String, content: String) : String{
     val response : HttpResponse = client.post("https://www.yuque.com/api/v2/repos/${config.namespace}/docs/"){
         setBody(requestJson.toJSONString())
         headers{
-            append(HttpHeaders.UserAgent,"ZhihuResolverBot")
             append(HttpHeaders.ContentType,"application/json")
             append("X-Auth-Token",config.yuqueToken)
+            set(HttpHeaders.UserAgent,"ZhihuResolverBot")
         }
     }
 
@@ -217,5 +219,31 @@ suspend fun yuque(client: HttpClient, title: String, content: String) : String{
         return result
     }else{
         throw Exception(response.bodyAsText())
+    }
+}
+
+fun getContent(jsoup: Document,url: String) : String{
+    if(url.contains("/answer/")){
+        val initialData = jsoup.getElementById("js-initialData")!!.text().to<JSONObject>()
+        val answer = initialData
+            .getJSONObject("initialState")
+            .getJSONObject("entities")
+            .getJSONObject("answers")
+            .getJSONObject(url.split("/").last())
+        val content = if(answer.containsKey("paidInfo")) {
+            answer.getJSONObject("paidInfo").getString("content")
+        } else{
+            answer.getString("content")
+        }
+        return content
+    }else {
+        val resolved = jsoup.getElementById("resolved")!!.text().to<JSONObject>()
+        return resolved
+            .getJSONObject("appContext")
+            .getJSONObject("__connectedAutoFetch")
+            .getJSONObject("manuscript")
+            .getJSONObject("data")
+            .getJSONObject("manuscriptData")
+            .getString("manuscript")
     }
 }
