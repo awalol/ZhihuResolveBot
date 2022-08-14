@@ -27,6 +27,7 @@ import java.io.FileReader
 import java.io.FileWriter
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.net.URL
 import kotlin.system.exitProcess
 
 val logger = LoggerFactory.getLogger("ZhihuResolverBot")
@@ -229,7 +230,7 @@ fun getContent(jsoup: Document,url: String) : String{
             .getJSONObject("initialState")
             .getJSONObject("entities")
             .getJSONObject("answers")
-            .getJSONObject(url.split("/").last())
+            .getJSONObject(URL(url).path.split("/").last())
         val content = if(answer.containsKey("paidInfo")) {
             answer.getJSONObject("paidInfo").getString("content")
         } else{
