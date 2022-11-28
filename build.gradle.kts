@@ -14,7 +14,7 @@ repositories {
 
 dependencies {
     testImplementation(kotlin("test"))
-    implementation("dev.inmo:tgbotapi:4.1.2")
+    implementation("dev.inmo:tgbotapi:4.1.3")
     implementation("com.alibaba.fastjson2:fastjson2-kotlin:2.0.19")
     implementation("org.slf4j:slf4j-simple:2.0.4")
 //    implementation("cn.hutool:hutool-all:5.8.5")
